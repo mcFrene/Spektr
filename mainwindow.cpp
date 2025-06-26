@@ -4,10 +4,11 @@
 #include <QPainterPath>
 #include <QGraphicsTextItem>
 #include <vector>
+#include <QDebug>
 
 bool flag = false; // Вкл/выкл
 
-void drawSpectr(Ui::MainWindow* ui);
+void drawSpectr(Ui::MainWindow* ui, std::vector<int> numbers);
 int randomInt(int a, int b);
 
 MainWindow::MainWindow(QWidget *parent)
@@ -18,6 +19,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(&thread, &QThread::started, &priemnik, &Priemnik::run);
     connect(&priemnik, &Priemnik::finished, &thread, &QThread::terminate);
+    connect(&priemnik, &Priemnik::sendData, this, &MainWindow::receiveData);
 }
 
 void MainWindow::on_start(){
@@ -35,6 +37,10 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
+void MainWindow::receiveData(std::vector<int> numbers){
+    drawSpectr(ui, numbers);
+}
+
 void MainWindow::on_pushButton_clicked()
 {
     if(flag){
@@ -50,7 +56,7 @@ void MainWindow::on_pushButton_clicked()
         ui->lineFreq->setEnabled(false);
 
         on_start();
-        drawSpectr(ui);
+        //drawSpectr(ui);
         on_stop();
     }
     flag = !flag;
@@ -58,7 +64,7 @@ void MainWindow::on_pushButton_clicked()
 
 
 
-void drawSpectr(Ui::MainWindow* ui){
+void drawSpectr(Ui::MainWindow* ui, std::vector<int> numbers){
     QGraphicsScene* scene = new QGraphicsScene();
 
     const int pointsQty = 1024;
@@ -107,13 +113,7 @@ void drawSpectr(Ui::MainWindow* ui){
     // Ось Y (слева)
     scene->addLine(0, 0, 0, height, axisPen);
 
-    std::vector<int> numbers;
-
-    for(int i=0; i<pointsQty; i++){
-        numbers.push_back(randomInt(0, 1024));
-    }
-
-    // Рисуем график синуса
+    // Рисуем график
     QPainterPath path;
     path.moveTo(0, numbers[0]);
 
@@ -127,9 +127,4 @@ void drawSpectr(Ui::MainWindow* ui){
 
     scene->setSceneRect(-40, 0, width + 50, height + 30); // с запасом для подписей
     ui->graphicsView->setScene(scene);
-}
-
-
-int randomInt(int a, int b){
-    return rand() % (b - a + 1) + a;
 }

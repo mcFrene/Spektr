@@ -13,6 +13,7 @@ public:
 
 signals:
     void finished();
+    void sendData(std::vector<int>);
 
 public slots:
     void run();

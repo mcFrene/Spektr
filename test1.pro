@@ -15,10 +15,14 @@ SOURCES += \
 
 HEADERS += \
     mainwindow.h \
-    priemnik.h
+    priemnik.h \
+    uhp_iq_stream.h \
+    uhp_rx_eth.h
 
 FORMS += \
     mainwindow.ui
+
+LIBS = -lWs2_32
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
