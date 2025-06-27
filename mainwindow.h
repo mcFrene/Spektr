@@ -15,7 +15,7 @@ class MainWindow : public QMainWindow
 {
     Q_OBJECT
     Priemnik priemnik;
-    QThread thread;
+    std::thread* socketThread;
 
 public:
     MainWindow(QWidget *parent = nullptr);
@@ -23,9 +23,9 @@ public:
 
 private slots:
     void on_pushButton_clicked();
-    void on_start();
-    void on_stop();
-    void receiveData(std::vector<int>);
+    //void on_start();
+    //void on_stop();
+    //void receiveData(std::vector<int>);
     //void on_lineEdit_editingFinished();
 
 private:
