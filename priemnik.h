@@ -4,21 +4,22 @@
 #include <QObject>
 #include <thread>
 
-
 class Priemnik : public QObject
 {
     Q_OBJECT
+    //std::thread* socketThread;
 public:
-
     explicit Priemnik(QObject *parent = nullptr);
-    bool getIsRunning();
+
+    //bool getIsRunning();
 
 signals:
-    void finished();
-    void sendData(std::vector<int>);
+    //void finished();
+    void sendData(double* numbers);
 
-//public slots:
-    //void setIsRunning(bool newIsRunning);
+public slots:
+    //void priemnikStart();
+    void socketWork();
 };
 
 #endif // PRIEMNIK_H

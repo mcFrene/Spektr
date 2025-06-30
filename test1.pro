@@ -22,7 +22,8 @@ HEADERS += \
 FORMS += \
     mainwindow.ui
 
-LIBS = -lWs2_32
+LIBS += -LC:/Qt/lib/fftw64/ -lfftw3-3 -lWs2_32
+INCLUDEPATH += C:/Qt/lib/fftw64/
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
