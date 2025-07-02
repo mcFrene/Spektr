@@ -2,24 +2,23 @@
 #define PRIEMNIK_H
 
 #include <QObject>
-#include <thread>
+#include <atomic>
 
 class Priemnik : public QObject
 {
     Q_OBJECT
-    //std::thread* socketThread;
+    //bool isRunning;
+    std::atomic<bool> isRunning;
+
 public:
     explicit Priemnik(QObject *parent = nullptr);
-
-    //bool getIsRunning();
-
+    bool getIsRunning();
 signals:
-    //void finished();
-    void sendData(double* numbers);
+    void sendData(std::vector<double> numbers);
 
 public slots:
-    //void priemnikStart();
-    void socketWork();
+    void priemnikFinish();
+    void socketWork(std::string ip, int port, int freq);
 };
 
 #endif // PRIEMNIK_H

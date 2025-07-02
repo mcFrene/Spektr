@@ -76,7 +76,7 @@
             <string>000.000.000.000</string>
            </property>
            <property name="text">
-            <string>192.168.0.1</string>
+            <string>192.168.21.1</string>
            </property>
            <property name="maxLength">
             <number>15</number>
@@ -183,7 +183,7 @@
             </font>
            </property>
            <property name="text">
-            <string>10000</string>
+            <string>4000</string>
            </property>
            <property name="maxLength">
             <number>5</number>

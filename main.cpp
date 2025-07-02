@@ -2,8 +2,6 @@
 
 #include <QApplication>
 
-int gl = 20;
-
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);

@@ -6,16 +6,30 @@
 #include <math.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <thread>
 
+const short interval = 200;
+const short pointsQty = 1024;
+const short averageQty = 10;
+const short partSize = 256;
 
 
 Priemnik::Priemnik(QObject *parent) : QObject{parent}
 {
 }
+
+void Priemnik::priemnikFinish(){
+    isRunning.store(false);
+}
+
+bool Priemnik::getIsRunning(){
+    return isRunning;
+}
+
 double complexTOgraph(fftw_complex z);
 
-void Priemnik::socketWork(){
+void Priemnik::socketWork(std::string ip, int port, int freq){
+    isRunning.store(true);
+
     WSAData wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         qDebug() << "Failed to find Winsock 2.2 or better." << Qt::endl;
@@ -34,12 +48,13 @@ void Priemnik::socketWork(){
     sockaddr_in tcp_addr;
     memset(&tcp_addr, 0, sizeof(tcp_addr));
     tcp_addr.sin_family = AF_INET; //AF_UNSPEC;
-    tcp_addr.sin_addr.s_addr = inet_addr("192.168.21.1");
-    tcp_addr.sin_port = htons(5050);
+    tcp_addr.sin_addr.s_addr = inet_addr(ip.c_str());
+    tcp_addr.sin_port = htons(port);
 
 
     if(::connect(socketTCP, (sockaddr *) &tcp_addr, sizeof(tcp_addr)) == SOCKET_ERROR){
         qDebug() << "Failed to connect (tcp): " << WSAGetLastError() << Qt::endl;
+        // Выкинуть ошибку?
         WSACleanup();
         return;
     }
@@ -50,7 +65,6 @@ void Priemnik::socketWork(){
         WSACleanup();
         return;
     }
-
 
 
     //UDP INIT
@@ -65,7 +79,7 @@ void Priemnik::socketWork(){
     sockaddr_in udp_addr;
     memset(&udp_addr, 0, sizeof(udp_addr));
     udp_addr.sin_family = AF_INET;
-    udp_addr.sin_addr.s_addr = 0; //inet_addr("192.168.21.111"); //0;
+    udp_addr.sin_addr.s_addr = 0;
     udp_addr.sin_port = htons(42000);
 
     if (bind(socketUDP, (sockaddr *) &udp_addr, sizeof(udp_addr)) == SOCKET_ERROR) {
@@ -85,7 +99,7 @@ void Priemnik::socketWork(){
     setFreq.head.cmd_type = 0x2;
     setFreq.head.messid = 1;
     setFreq.head.size = sizeof(ETH_RX_CTRL::set_freq);
-    setFreq.carrier_freq_Hz = 3900000; //минимальное значение
+    setFreq.carrier_freq_Hz = freq*1000; //минимальное значение
 
 
     if(send(socketTCP, (char*)&setFreq, sizeof(setFreq), 0) == SOCKET_ERROR){
@@ -107,7 +121,7 @@ void Priemnik::socketWork(){
 
 
     ETH_RX_CTRL::status tcp_answer;
-    UDP_IQ::header_t udp_header;
+    //UDP_IQ::header_t udp_header;
     fd_set read_s;
     struct timeval tv;
     tv.tv_sec = 0;
@@ -122,28 +136,25 @@ void Priemnik::socketWork(){
     }
 
 
-    //std::vector<char> buffer(2048);
-    unsigned char buffer[4096]{'0'};
+    //std::vector<char> buffer(4096);
 
     //MOLOTILKA
-    int count = 0;
-    int interval = GetTickCount64();
-    UDP_IQ::cint32_t rawNums[1024];
-    fftw_complex in[1024];
-    fftw_complex out[1024];
-    fftw_plan plan = fftw_plan_dft_1d(1024, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
-    double graph[1024];
+    int packetsCount = 0;
+    int graphCount = 0;
+    int currentTime = GetTickCount64();
+    BYTE buffer[3072];
+    fftw_complex rawComplexNumbers[pointsQty];
 
-    for(int i=0; i<1024; i++){
-        rawNums[i].im = 0;
-        rawNums[i].re = 0;
-    }
-    while(true){
+    fftw_plan plan = fftw_plan_dft_1d(pointsQty, rawComplexNumbers, rawComplexNumbers, FFTW_FORWARD, FFTW_ESTIMATE);
+
+    std::vector<std::vector<double>> numbersForAverage(averageQty, std::vector<double>(pointsQty));
+    std::vector<double> numbersForDraw(pointsQty);
+
+    while(isRunning.load()){
         FD_ZERO(&read_s);
         FD_SET(socketTCP, &read_s);
         FD_SET(socketUDP, &read_s);
         select(0, &read_s, NULL, NULL, &tv);
-
 
         //TCP RECV
         if(FD_ISSET(socketTCP, &read_s)){
@@ -163,12 +174,9 @@ void Priemnik::socketWork(){
                     <<" status: "
                     << tcp_answer.head.cmd_complete << Qt::endl;
             }
-
-            ;//qDebug() << "recvfrom socketTCP";
         }
 
         //UDP RECV
-
         if(FD_ISSET(socketUDP, &read_s)){
             int len = recvfrom(socketUDP, (char *) &buffer, sizeof(buffer), 0, (sockaddr*)&udp_addr, &fromlen_udp);
             if(len == SOCKET_ERROR){
@@ -178,33 +186,47 @@ void Priemnik::socketWork(){
             }
 
             if (len > 0) {
-                memcpy(&udp_header, &buffer, sizeof(UDP_IQ::header_t));
-                memcpy(&rawNums[256*(count % 4)], &buffer[sizeof(UDP_IQ::header_t)], len - sizeof(UDP_IQ::header_t));
-                //if(udp_header.iq_format == UDP_IQ::iq_format_t::iq_complex_int32
-            }
-            if(count > 0 && count % 4 == 0){
-
-                for(int i=0; i<1024; i++){
-                    in[i][0] = rawNums[i].re;
-                    in[i][1] = rawNums[i].im;
+                //udp_header = *(UDP_IQ::header_t*)(buffer);
+                int start = 256*(packetsCount % 4);
+                for(int i=0; i<partSize; i++){
+                    rawComplexNumbers[start+i][0] = *(int32_t*)(buffer + sizeof(UDP_IQ::header_t) + i*8);
+                    rawComplexNumbers[start+i][1] = *(int32_t*)(buffer + sizeof(UDP_IQ::header_t) + i*8 + sizeof(int32_t));
+                    //int seq = udp_header.seqnum;
+                    //qDebug()<< seq << Qt::endl;
                 }
-
+            }
+            if(packetsCount > 0 && packetsCount % 4 == 0){
                 fftw_execute(plan);
 
-                for(int i=0; i<1024; i++){
-                    graph[i] = complexTOgraph(out[i]);
+                if(graphCount < averageQty){
+                    for(int i=0; i<pointsQty; i++){
+                        numbersForAverage[graphCount][i] = complexTOgraph(rawComplexNumbers[i]);
+                    }
+                    graphCount++;
+                }
+                else{
+                    for(int i=0; i<averageQty-1; i++){
+                        numbersForAverage[i] = numbersForAverage[i+1];
+                    }
+
+                    for(int i=0; i<pointsQty; i++){
+                        numbersForAverage[averageQty-1][i] = complexTOgraph(rawComplexNumbers[i]);
+                    }
                 }
 
-                if(GetTickCount64() - interval > 1000){
-                    emit sendData(graph);
-                    interval = GetTickCount64();
+                if(graphCount == averageQty && GetTickCount64() - currentTime > interval){
+                    for(int i=0; i<pointsQty; i++){
+                        int sum = 0;
+                        for(int j=0; j<averageQty; j++){
+                            sum += numbersForAverage[j][i];
+                        }
+                        numbersForDraw[i] = sum / averageQty;
+                    }
+                    emit sendData(numbersForDraw);
+                    currentTime = GetTickCount64();
                 }
-
-
-                //break;
-                //qDebug() << "recvfrom socketUDP";
             }
-            count++;
+            packetsCount++;
         }
     }
     fftw_destroy_plan(plan);

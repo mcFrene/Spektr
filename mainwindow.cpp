@@ -6,26 +6,30 @@
 #include <QGraphicsTextItem>
 #include <vector>
 #include <QDebug>
+#include <thread>
 
-
-void drawSpectr(Ui::MainWindow* ui, double* numbers);
+void drawSpectr(Ui::MainWindow* ui, std::vector<double> numbers);
 
 void clearScene(Ui::MainWindow* ui);
 int randomInt(int a, int b);
 
 bool flag = false; // Вкл/выкл
+//std::thread* sThread;
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
-    connect(this, SIGNAL(startPriemnik()), &preim, SLOT(socketWork()));
-    connect(&preim, SIGNAL(sendData(double*)), this, SLOT(receiveData(double*)));
+    connect(this, SIGNAL(priemnikOff()), &preim, SLOT(priemnikFinish()));
+    connect(&preim, SIGNAL(sendData(std::vector<double>)), this, SLOT(receiveData(std::vector<double>)));
 }
 
 MainWindow::~MainWindow()
 {
+    if(socketThread->joinable()){
+        socketThread->join();
+    }
     delete ui;
 }
 
@@ -36,6 +40,12 @@ void MainWindow::on_pushButton_clicked()
         ui->lineIP->setEnabled(true);
         ui->linePort->setEnabled(true);
         ui->lineFreq->setEnabled(true);
+
+        emit priemnikOff();
+        // if(socketThread->joinable()){
+        //     socketThread->join();
+        // }
+        clearScene(ui);
     }
     else{
         ui->pushButton->setText("Выключить");
@@ -43,27 +53,35 @@ void MainWindow::on_pushButton_clicked()
         ui->linePort->setEnabled(false);
         ui->lineFreq->setEnabled(false);
 
-        //emit startPriemnik();
-        socketThread = std::thread([this](){
-            preim.socketWork();
+        std::string ip = ui->lineIP->text().toStdString();
+        int port = ui->linePort->text().toInt();
+        int freq = ui->lineFreq->text().toInt();
+
+        // sThread = new std::thread([this, ip, port, freq](){
+        //     preim.socketWork(ip, port, freq);
+        // });
+
+        socketThread = new std::thread([this, ip, port, freq](){
+            preim.socketWork(ip, port, freq);
         });
     }
     flag = !flag;
 }
 
-void MainWindow::receiveData(double* numbers){
+void MainWindow::receiveData(std::vector<double> numbers){
     drawSpectr(ui, numbers);
 }
 
-void drawSpectr(Ui::MainWindow* ui, double* numbers){
+void drawSpectr(Ui::MainWindow* ui, std::vector<double> numbers){
     QGraphicsScene* scene = new QGraphicsScene();
 
-    const int pointsQty = 1024;
+    const int xSize = 1024;
+    const int ySize = 256;
     const int gridXQty = 16;
     const int gridYQty = 16;
 
-    const int gridStepX = pointsQty/gridXQty; // шаг сетки по X
-    const int gridStepY = pointsQty/gridYQty; // шаг сетки по Y
+    const int gridStepX = xSize/gridXQty; // шаг сетки по X
+    const int gridStepY = ySize/gridYQty; // шаг сетки по Y
 
     const int width = ui->graphicsView->width() - 2*gridStepX;
     const int height = ui->graphicsView->height() - 2*gridStepY;
@@ -72,8 +90,8 @@ void drawSpectr(Ui::MainWindow* ui, double* numbers){
     gridPen.setStyle(Qt::DashLine);
 
     // Вертикальные линии сетки
-    for(int x = 0; x <= pointsQty; x+=gridStepX){
-        qreal scaledX = x * width / pointsQty;
+    for(int x = 0; x <= xSize; x+=gridStepX){
+        qreal scaledX = x * width / xSize;
         scene->addLine(scaledX, 0, scaledX, height, gridPen);
         // Добавим подписи по X
         QGraphicsTextItem* text = scene->addText(QString::number(x));
@@ -83,11 +101,11 @@ void drawSpectr(Ui::MainWindow* ui, double* numbers){
     }
 
     // Горизонтальные линии сетки
-    for(int y = 0; y <= pointsQty; y += gridStepY){
-        qreal scaledY = y * height / pointsQty;
+    for(int y = 0; y <= ySize; y += gridStepY){
+        qreal scaledY = y * height / ySize;
         scene->addLine(0, scaledY, width, scaledY, gridPen);
         // Подписи по Y (инвертируем координату, чтобы 0 было внизу)
-        int val = pointsQty - y;
+        int val = ySize - y;
         QGraphicsTextItem* text = scene->addText(QString::number(val));
         text->setPos(-30, scaledY - 10);
         text->setDefaultTextColor(Qt::darkGray);
@@ -106,17 +124,17 @@ void drawSpectr(Ui::MainWindow* ui, double* numbers){
 
     // Рисуем график
     QPainterPath path;
-    path.moveTo(0, numbers[0]);
+    path.moveTo(0, (ySize-numbers[0]) * height / ySize);
 
-    for(int i = 1; i < pointsQty; i++){
-        double px = (double)i * width / pointsQty;
-        double py = numbers[i] * height / pointsQty;
+    for(int i = 1; i < xSize; i++){
+        double px = (double)i * width / xSize;
+        double py = (ySize - numbers[i])*height/ySize; //numbers[i] * height / ySize;
         path.lineTo(px, py);
     }
 
-    scene->addPath(path, QPen(Qt::blue, 2));
+    scene->addPath(path, QPen(Qt::darkGreen, 2));
 
-    scene->setSceneRect(-40, 0, width + 50, height + 30); // с запасом для подписей
+    scene->setSceneRect(-40, 0, width + gridStepX, height + gridStepY); // с запасом для подписей
     ui->graphicsView->setScene(scene);
 }
 
