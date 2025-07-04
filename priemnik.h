@@ -8,13 +8,15 @@ class Priemnik : public QObject
 {
     Q_OBJECT
     //bool isRunning;
-    std::atomic<bool> isRunning;
+
 
 public:
     explicit Priemnik(QObject *parent = nullptr);
     bool getIsRunning();
+     std::atomic<bool> isRunning;
 signals:
     void sendData(std::vector<double> numbers);
+    void clearScene();
 
 public slots:
     void priemnikFinish();

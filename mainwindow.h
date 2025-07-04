@@ -13,16 +13,19 @@ QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
 {
-    Priemnik preim;
+    Priemnik preim{this};
     std::thread* socketThread;
     Q_OBJECT
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
-signals:;
+    void threadExec(std::string ip, int port, int freq);
+
+signals:
     void priemnikOff();
 private slots:
     void on_pushButton_clicked();
+    void clearScene();
     //void on_start();
     //void on_stop();
     void receiveData(std::vector<double>);

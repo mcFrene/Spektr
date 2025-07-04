@@ -9,9 +9,7 @@
 #include <thread>
 
 void drawSpectr(Ui::MainWindow* ui, std::vector<double> numbers);
-
 void clearScene(Ui::MainWindow* ui);
-int randomInt(int a, int b);
 
 bool flag = false; // Вкл/выкл
 //std::thread* sThread;
@@ -23,6 +21,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
     connect(this, SIGNAL(priemnikOff()), &preim, SLOT(priemnikFinish()));
     connect(&preim, SIGNAL(sendData(std::vector<double>)), this, SLOT(receiveData(std::vector<double>)));
+    connect(&preim, &Priemnik::clearScene, this, &MainWindow::clearScene);
 }
 
 MainWindow::~MainWindow()
@@ -30,6 +29,7 @@ MainWindow::~MainWindow()
     if(socketThread->joinable()){
         socketThread->join();
     }
+    delete socketThread;
     delete ui;
 }
 
@@ -41,11 +41,9 @@ void MainWindow::on_pushButton_clicked()
         ui->linePort->setEnabled(true);
         ui->lineFreq->setEnabled(true);
 
-        emit priemnikOff();
-        // if(socketThread->joinable()){
-        //     socketThread->join();
-        // }
-        clearScene(ui);
+        preim.isRunning = false;
+        socketThread->join();
+        delete socketThread;
     }
     else{
         ui->pushButton->setText("Выключить");
@@ -56,16 +54,15 @@ void MainWindow::on_pushButton_clicked()
         std::string ip = ui->lineIP->text().toStdString();
         int port = ui->linePort->text().toInt();
         int freq = ui->lineFreq->text().toInt();
-
-        // sThread = new std::thread([this, ip, port, freq](){
-        //     preim.socketWork(ip, port, freq);
-        // });
-
-        socketThread = new std::thread([this, ip, port, freq](){
-            preim.socketWork(ip, port, freq);
-        });
+        preim.isRunning = true;
+        socketThread = new std::thread(&MainWindow::threadExec, this, ip, port, freq);
     }
     flag = !flag;
+}
+
+void MainWindow::threadExec(std::string ip, int port, int freq)
+{
+    preim.socketWork(ip, port, freq);
 }
 
 void MainWindow::receiveData(std::vector<double> numbers){
@@ -73,18 +70,19 @@ void MainWindow::receiveData(std::vector<double> numbers){
 }
 
 void drawSpectr(Ui::MainWindow* ui, std::vector<double> numbers){
+    //return;
     QGraphicsScene* scene = new QGraphicsScene();
 
     const int xSize = 1024;
-    const int ySize = 256;
+    const int ySize = 128;
     const int gridXQty = 16;
     const int gridYQty = 16;
 
     const int gridStepX = xSize/gridXQty; // шаг сетки по X
     const int gridStepY = ySize/gridYQty; // шаг сетки по Y
 
-    const int width = ui->graphicsView->width() - 2*gridStepX;
-    const int height = ui->graphicsView->height() - 2*gridStepY;
+    const int width = ui->graphicsView->width() - 3*gridStepX;
+    const int height = ui->graphicsView->height() - 3*gridStepY;
 
     QPen gridPen(Qt::lightGray);
     gridPen.setStyle(Qt::DashLine);
@@ -126,11 +124,12 @@ void drawSpectr(Ui::MainWindow* ui, std::vector<double> numbers){
     QPainterPath path;
     path.moveTo(0, (ySize-numbers[0]) * height / ySize);
 
-    for(int i = 1; i < xSize; i++){
+    for(int i = 1; i < xSize; i+=4){
         double px = (double)i * width / xSize;
-        double py = (ySize - numbers[i])*height/ySize; //numbers[i] * height / ySize;
+        double py = (ySize - numbers[i]) * height / ySize; //numbers[i] * height / ySize;
         path.lineTo(px, py);
     }
+
 
     scene->addPath(path, QPen(Qt::darkGreen, 2));
 
@@ -138,7 +137,7 @@ void drawSpectr(Ui::MainWindow* ui, std::vector<double> numbers){
     ui->graphicsView->setScene(scene);
 }
 
-void clearScene(Ui::MainWindow* ui){
+void MainWindow::clearScene(){
     QGraphicsScene* scene = new QGraphicsScene();
     ui->graphicsView->setScene(scene);
 }
