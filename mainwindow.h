@@ -2,8 +2,9 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include<priemnik.h>
-#include<QThread>
+#include <priemnik.h>
+#include <QThread>
+#include <QGraphicsScene>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -15,12 +16,17 @@ class MainWindow : public QMainWindow
 {
     Priemnik preim{this};
     std::thread* socketThread;
+    QGraphicsScene* scene = nullptr;
+    QGraphicsPathItem* graphPathItem = nullptr;
     Q_OBJECT
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
     void threadExec(std::string ip, int port, int freq);
-
+    void drawSpectr(std::vector<double> numbers);
+    void initScene();
+protected:
+    void resizeEvent(QResizeEvent* event) override;
 signals:
     void priemnikOff();
 private slots:

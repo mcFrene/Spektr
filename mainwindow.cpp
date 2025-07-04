@@ -7,11 +7,22 @@
 #include <vector>
 #include <QDebug>
 #include <thread>
+#include <QPainter>
 
 void drawSpectr(Ui::MainWindow* ui, std::vector<double> numbers);
-void clearScene(Ui::MainWindow* ui);
 
-bool flag = false; // Вкл/выкл
+bool flag = false;
+const int xSize = 1024;
+const int ySize = 128;
+const int gridXQty = 16;
+const int gridYQty = 16;
+
+
+
+
+
+
+// Вкл/выкл
 //std::thread* sThread;
 
 MainWindow::MainWindow(QWidget *parent)
@@ -19,6 +30,7 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+
     connect(this, SIGNAL(priemnikOff()), &preim, SLOT(priemnikFinish()));
     connect(&preim, SIGNAL(sendData(std::vector<double>)), this, SLOT(receiveData(std::vector<double>)));
     connect(&preim, &Priemnik::clearScene, this, &MainWindow::clearScene);
@@ -51,6 +63,8 @@ void MainWindow::on_pushButton_clicked()
         ui->linePort->setEnabled(false);
         ui->lineFreq->setEnabled(false);
 
+
+        initScene();
         std::string ip = ui->lineIP->text().toStdString();
         int port = ui->linePort->text().toInt();
         int freq = ui->lineFreq->text().toInt();
@@ -66,43 +80,52 @@ void MainWindow::threadExec(std::string ip, int port, int freq)
 }
 
 void MainWindow::receiveData(std::vector<double> numbers){
-    drawSpectr(ui, numbers);
+    drawSpectr(numbers);
 }
 
-void drawSpectr(Ui::MainWindow* ui, std::vector<double> numbers){
-    //return;
-    QGraphicsScene* scene = new QGraphicsScene();
+void MainWindow::clearScene(){
+    ui->graphicsView->setScene(nullptr); // отвязываем сцену от view
+    delete scene;
+    scene = nullptr;
+    graphPathItem = nullptr;
+}
 
-    const int xSize = 1024;
-    const int ySize = 128;
-    const int gridXQty = 16;
-    const int gridYQty = 16;
-
+void MainWindow::initScene() {
     const int gridStepX = xSize/gridXQty; // шаг сетки по X
     const int gridStepY = ySize/gridYQty; // шаг сетки по Y
 
     const int width = ui->graphicsView->width() - 3*gridStepX;
     const int height = ui->graphicsView->height() - 3*gridStepY;
 
+    if (scene) {
+        ui->graphicsView->setScene(nullptr); // отвязываем сцену от view
+        delete scene;
+        scene = nullptr;
+        graphPathItem = nullptr;
+    }
+
+    scene = new QGraphicsScene(this);
+    ui->graphicsView->setScene(scene);
+
     QPen gridPen(Qt::lightGray);
     gridPen.setStyle(Qt::DashLine);
 
-    // Вертикальные линии сетки
-    for(int x = 0; x <= xSize; x+=gridStepX){
+    // Вертикальные линии сетки + подписи
+    for(int x = 0; x <= xSize; x += gridStepX){
         qreal scaledX = x * width / xSize;
         scene->addLine(scaledX, 0, scaledX, height, gridPen);
-        // Добавим подписи по X
+
         QGraphicsTextItem* text = scene->addText(QString::number(x));
         text->setPos(scaledX, height + 2);
         text->setDefaultTextColor(Qt::darkGray);
         text->setScale(0.7);
     }
 
-    // Горизонтальные линии сетки
+    // Горизонтальные линии сетки + подписи
     for(int y = 0; y <= ySize; y += gridStepY){
         qreal scaledY = y * height / ySize;
         scene->addLine(0, scaledY, width, scaledY, gridPen);
-        // Подписи по Y (инвертируем координату, чтобы 0 было внизу)
+
         int val = ySize - y;
         QGraphicsTextItem* text = scene->addText(QString::number(val));
         text->setPos(-30, scaledY - 10);
@@ -110,34 +133,45 @@ void drawSpectr(Ui::MainWindow* ui, std::vector<double> numbers){
         text->setScale(0.7);
     }
 
-    // Рисуем оси
+    // Оси
     QPen axisPen(Qt::black);
     axisPen.setWidth(2);
+    scene->addLine(0, height, width, height, axisPen); // X
+    scene->addLine(0, 0, 0, height, axisPen);          // Y
 
-    // Ось X (по центру по вертикали)
-    scene->addLine(0, height, width, height, axisPen);
+    scene->setSceneRect(-40, 0, width + gridStepX, height + gridStepY);
 
-    // Ось Y (слева)
-    scene->addLine(0, 0, 0, height, axisPen);
+    // Создаём пустой график
+    graphPathItem = scene->addPath(QPainterPath(), QPen(Qt::darkGreen, 1));
+}
 
-    // Рисуем график
+void MainWindow::drawSpectr(std::vector<double> numbers){
+    const int gridStepX = xSize/gridXQty; // шаг сетки по X
+    const int gridStepY = ySize/gridYQty; // шаг сетки по Y
+
+    const int width = ui->graphicsView->width() - 3*gridStepX;
+    const int height = ui->graphicsView->height() - 3*gridStepY;
+
     QPainterPath path;
-    path.moveTo(0, (ySize-numbers[0]) * height / ySize);
+    path.moveTo(0, (ySize - numbers[0]) * height / ySize);
 
-    for(int i = 1; i < xSize; i+=4){
+    for(int i = 1; i < xSize && i < numbers.size(); i++){
         double px = (double)i * width / xSize;
-        double py = (ySize - numbers[i]) * height / ySize; //numbers[i] * height / ySize;
+        double py = (ySize - numbers[i]) * height / ySize;
         path.lineTo(px, py);
     }
 
-
-    scene->addPath(path, QPen(Qt::darkGreen, 2));
-
-    scene->setSceneRect(-40, 0, width + gridStepX, height + gridStepY); // с запасом для подписей
-    ui->graphicsView->setScene(scene);
+    //graphPathItem->prepareGeometryChange();
+    graphPathItem->setPath(path);
 }
 
-void MainWindow::clearScene(){
-    QGraphicsScene* scene = new QGraphicsScene();
-    ui->graphicsView->setScene(scene);
+void MainWindow::resizeEvent(QResizeEvent* event)
+{
+    QMainWindow::resizeEvent(event); // обязательно вызвать базовый обработчик
+
+    // Пересоздаём сцену и сетку с новыми размерами
+    if(flag){
+        initScene();
+    }
 }
+

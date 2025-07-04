@@ -6,6 +6,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <iostream>
+#include <algorithm>
 
 const short interval = 0;
 const short pointsQty = 1024;
@@ -152,82 +153,75 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
 
         // //TCP RECV
         if(FD_ISSET(socketTCP, &read_s)){
-            int len = recv(socketTCP, (char *) &buffer, sizeof(buffer), 0);
+            int len = 1;
+            while(len != SOCKET_ERROR){
+                len = recv(socketTCP, (char *) &buffer, sizeof(buffer), 0);
 
-            if(len == SOCKET_ERROR){
-                std::cout << "Failed to recvfromUDP: " << WSAGetLastError() << std::endl;
-                WSACleanup();
-                return;
-            }
+                if (len > 0) {
+                    memcpy(&tcp_answer, &buffer, sizeof(ETH_RX_CTRL::status));
+                    std::cout<<
+                        "Answer to command : "
+                              <<ETH_RX_CTRL::cmdCOMMANDtoStr(tcp_answer.head.cmd_ack_type)
+                              <<" status: "
+                              << tcp_answer.head.cmd_complete << std::endl;
+                }
 
-            if (len > 0) {
-                memcpy(&tcp_answer, &buffer, sizeof(ETH_RX_CTRL::status));
-                std::cout<<
-                    "Answer to command : "
-                    <<ETH_RX_CTRL::cmdCOMMANDtoStr(tcp_answer.head.cmd_ack_type)
-                    <<" status: "
-                    << tcp_answer.head.cmd_complete << std::endl;
+                if(len == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK){
+                    std::cout << "Failed to recvfromTCP: " << WSAGetLastError() << std::endl;
+                    WSACleanup();
+                    return;
+                }
             }
         }
 
         //UDP RECV
         if(FD_ISSET(socketUDP, &read_s)){
             int len = 1;
-            recvfrom(socketUDP, (char *) &buffer, sizeof(buffer), 0, (sockaddr*)&udp_addr, &fromlen_udp);
-            if(len == SOCKET_ERROR){
-                std::cout << "Failed to recvfromUDP: " << WSAGetLastError() << std::endl;
-                WSACleanup();
-                return;
-            }
+            while(len != SOCKET_ERROR){
+                len = recvfrom(socketUDP, (char *) &buffer, sizeof(buffer), 0, (sockaddr*)&udp_addr, &fromlen_udp);
+                if(len == 2066){
 
-            if (len > 0) {
-                //UDP_IQ::header_t udp_header = *(UDP_IQ::header_t*)(buffer);
-                //int seq = udp_header.seqnum;
-                int start = 256 * (packetsCount % 4);
-                for(int i=0; i<partSize; i++){
-                    rawComplexNumbers[start+i][0] = *(int32_t*)(buffer + sizeof(UDP_IQ::header_t) + i*8);
-                    rawComplexNumbers[start+i][1] = *(int32_t*)(buffer + sizeof(UDP_IQ::header_t) + i*8 + sizeof(int32_t));
-                }
+                    int start = 256 * (packetsCount % 4);
+                    for(int i=0; i<partSize; i++){
+                        rawComplexNumbers[start+i][0] = *(int32_t*)(buffer + sizeof(UDP_IQ::header_t) + i*8);
+                        rawComplexNumbers[start+i][1] = *(int32_t*)(buffer + sizeof(UDP_IQ::header_t) + i*8 + sizeof(int32_t));
+                    }
 
-                if(packetsCount > 0 && packetsCount % 4 == 0){
-                    fftw_execute(plan);
+                    if(packetsCount > 0 && packetsCount % 4 == 0){
+                        fftw_execute(plan);
 
-                    if(graphCount < averageQty){
-                        for(int i=0; i<pointsQty; i++){
-                            numbersForAverage[graphCount][i] = complexTOgraph(rawComplexNumbers[i]);
+                        if(graphCount < averageQty){
+                            for(int i=0; i<pointsQty; i++){
+                                numbersForAverage[graphCount][i] = complexTOgraph(rawComplexNumbers[i]);
+                            }
                         }
+                        else{
+                            for(int i=0; i<pointsQty; i++){
+                                numbersForAverage[graphCount % 10][i] = complexTOgraph(rawComplexNumbers[i]);
+                            }
+                        }
+
+                        for(int i=0; i<pointsQty; i++){
+                            int sum = 0;
+                            for(int j=0; j<averageQty; j++){
+                                sum += numbersForAverage[j][i];
+                            }
+
+                            numbersForDraw[i] = sum / (graphCount < averageQty ? graphCount+1 : averageQty);
+                        }
+
+                        rotate(numbersForDraw.begin(), numbersForDraw.begin() + 512, numbersForDraw.end());
+                        emit sendData(numbersForDraw);
                         graphCount++;
                     }
-                    else{
-                        for(int i=0; i<averageQty-1; i++){
-                            numbersForAverage[i] = numbersForAverage[i+1];
-                        }
-
-                        for(int i=0; i<pointsQty; i++){
-                            numbersForAverage[averageQty-1][i] = complexTOgraph(rawComplexNumbers[i]);
-                        }
-                    }
-
-                    if(graphCount == averageQty && GetTickCount64() - currentTime > interval)
-                    {
-                        for(int i=0; i<pointsQty; i++){
-                           int sum = 0;
-                           for(int j=0; j<averageQty; j++){
-                               sum += numbersForAverage[j][i];
-                           }
-                           numbersForDraw[i] = sum / averageQty;
-                        }
-
-
-                        for(int i=0; i<pointsQty/2; i++){
-                            std::swap(numbersForDraw[i], numbersForDraw[i+pointsQty/2]);
-                        }
-
-                        emit sendData(numbersForDraw);
-                        currentTime = GetTickCount64();
-                    }
+                    packetsCount++;
                 }
-                packetsCount++;
+
+                if(len == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK){
+                    std::cout << "Failed to recvfromUDP: " << WSAGetLastError() << std::endl;
+                    WSACleanup();
+                    return;
+                }
             }
         }
     }
