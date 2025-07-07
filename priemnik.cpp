@@ -8,26 +8,23 @@
 #include <iostream>
 #include <algorithm>
 
-const short interval = 0;
 const short pointsQty = 1024;
-const short averageQty = 10;
 const short partSize = 256;
-const short onePartQty = 4; //pointsQty/partSize;
-
+const short partsQty = pointsQty/partSize;
+const short averageQty = 10;
+const short maxPacketSize = 3*1024;
 
 Priemnik::Priemnik(QObject *parent) : QObject{parent}
 {
 }
 
-void Priemnik::priemnikFinish(){
-    isRunning.store(false);
-}
-
-double complexTOgraph(fftw_complex z);
+double complexLog(fftw_complex z);
+void recvTCPPacket(SOCKET socketTCP);
+void saveData(std::vector<std::vector<double>>& numbersForAverage, fftw_complex* numbersForFFT, int graphCount);
+void drawData(std::vector<std::vector<double>>& numbersForAverage, int graphCount, Priemnik* p);
+void accumulateForFFT(BYTE* buffer, fftw_complex* numbersForFFT, int packetsCount);
 
 void Priemnik::socketWork(std::string ip, int port, int freq){
-   // // isRunning.store(true);
-
     WSAData wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         std::cout << "Failed to find Winsock 2.2 or better." << std::endl;
@@ -52,7 +49,7 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
 
     if(::connect(socketTCP, (sockaddr *) &tcp_addr, sizeof(tcp_addr)) == SOCKET_ERROR){
         std::cout << "Failed to connect (tcp): " << WSAGetLastError() << std::endl;
-        // Выкинуть ошибку?
+        emit tcpError();
         WSACleanup();
         return;
     }
@@ -99,33 +96,25 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
     setFreq.head.size = sizeof(ETH_RX_CTRL::set_freq);
     setFreq.carrier_freq_Hz = freq*1000; //минимальное значение
 
-
     if(send(socketTCP, (char*)&setFreq, sizeof(setFreq), 0) == SOCKET_ERROR){
         std::cout << "Failed status request: " << WSAGetLastError() << std::endl;
         WSACleanup();
         return;
     }
 
-
     //SET UDP STREAM
     ETH_RX_CTRL::ctrl_iq_stream_now startStream;
     startStream.head.messid = 2;
     startStream.head.cmd_type = 0xC;
     startStream.head.size = sizeof(ETH_RX_CTRL::ctrl_iq_stream_now);
-
-    startStream.IP_stream = 0; //inet_addr("192.168.21.111"); //inet_addr("192.168.21.1");
-    startStream.port_stream = 42000;//htons(42000);
+    startStream.IP_stream = 0;
+    startStream.port_stream = 42000;
     startStream.preset_num = ETH_RX_CTRL::pres_default;
 
-
-    ETH_RX_CTRL::status tcp_answer;
-    //UDP_IQ::header_t udp_header;
     fd_set read_s;
     struct timeval tv;
     tv.tv_sec = 0;
     tv.tv_usec = 1000;
-    int fromlen_udp = sizeof(udp_addr);
-
 
     if(send(socketTCP, (char*)&startStream, sizeof(startStream), 0) == SOCKET_ERROR){
         std::cout << "Failed srart stream: " << WSAGetLastError() << std::endl;
@@ -136,14 +125,11 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
     //MOLOTILKA
     int packetsCount = 0;
     int graphCount = 0;
-    int currentTime = GetTickCount64();
-    BYTE buffer[3072];
-    fftw_complex rawComplexNumbers[pointsQty];
-
-    fftw_plan plan = fftw_plan_dft_1d(pointsQty, rawComplexNumbers, rawComplexNumbers, FFTW_FORWARD, FFTW_ESTIMATE);
-
+    fftw_complex numbersForFFT[pointsQty];
+    BYTE buffer[maxPacketSize];
+    fftw_plan plan = fftw_plan_dft_1d(pointsQty, numbersForFFT, numbersForFFT, FFTW_FORWARD, FFTW_ESTIMATE);
     std::vector<std::vector<double>> numbersForAverage(averageQty, std::vector<double>(pointsQty));
-    std::vector<double> numbersForDraw(pointsQty);
+    int fromlen_udp = sizeof(udp_addr);
 
     while(isRunning.load()){
         FD_ZERO(&read_s);
@@ -153,25 +139,7 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
 
         // //TCP RECV
         if(FD_ISSET(socketTCP, &read_s)){
-            int len = 1;
-            while(len != SOCKET_ERROR){
-                len = recv(socketTCP, (char *) &buffer, sizeof(buffer), 0);
-
-                if (len > 0) {
-                    memcpy(&tcp_answer, &buffer, sizeof(ETH_RX_CTRL::status));
-                    std::cout<<
-                        "Answer to command : "
-                              <<ETH_RX_CTRL::cmdCOMMANDtoStr(tcp_answer.head.cmd_ack_type)
-                              <<" status: "
-                              << tcp_answer.head.cmd_complete << std::endl;
-                }
-
-                if(len == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK){
-                    std::cout << "Failed to recvfromTCP: " << WSAGetLastError() << std::endl;
-                    WSACleanup();
-                    return;
-                }
-            }
+            recvTCPPacket(socketTCP);
         }
 
         //UDP RECV
@@ -180,41 +148,15 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
             while(len != SOCKET_ERROR){
                 len = recvfrom(socketUDP, (char *) &buffer, sizeof(buffer), 0, (sockaddr*)&udp_addr, &fromlen_udp);
                 if(len == 2066){
+                    accumulateForFFT(buffer, numbersForFFT, packetsCount);
+                    packetsCount++;
 
-                    int start = 256 * (packetsCount % 4);
-                    for(int i=0; i<partSize; i++){
-                        rawComplexNumbers[start+i][0] = *(int32_t*)(buffer + sizeof(UDP_IQ::header_t) + i*8);
-                        rawComplexNumbers[start+i][1] = *(int32_t*)(buffer + sizeof(UDP_IQ::header_t) + i*8 + sizeof(int32_t));
-                    }
-
-                    if(packetsCount > 0 && packetsCount % 4 == 0){
+                    if(packetsCount % partsQty == 0){
                         fftw_execute(plan);
-
-                        if(graphCount < averageQty){
-                            for(int i=0; i<pointsQty; i++){
-                                numbersForAverage[graphCount][i] = complexTOgraph(rawComplexNumbers[i]);
-                            }
-                        }
-                        else{
-                            for(int i=0; i<pointsQty; i++){
-                                numbersForAverage[graphCount % 10][i] = complexTOgraph(rawComplexNumbers[i]);
-                            }
-                        }
-
-                        for(int i=0; i<pointsQty; i++){
-                            int sum = 0;
-                            for(int j=0; j<averageQty; j++){
-                                sum += numbersForAverage[j][i];
-                            }
-
-                            numbersForDraw[i] = sum / (graphCount < averageQty ? graphCount+1 : averageQty);
-                        }
-
-                        rotate(numbersForDraw.begin(), numbersForDraw.begin() + 512, numbersForDraw.end());
-                        emit sendData(numbersForDraw);
+                        saveData(numbersForAverage, numbersForFFT, graphCount);
+                        drawData(numbersForAverage, graphCount, this);
                         graphCount++;
                     }
-                    packetsCount++;
                 }
 
                 if(len == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK){
@@ -225,7 +167,6 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
             }
         }
     }
-
 
     ETH_RX_CTRL::stop_iq_stream stopStream;
     stopStream.head.messid = 0;
@@ -240,9 +181,63 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
 
     fftw_destroy_plan(plan);
     WSACleanup();
-    emit clearScene();
+    emit priemnikFinished();
 }
 
-double complexTOgraph(fftw_complex z){
+double complexLog(fftw_complex z){
     return 10*log10(z[0]*z[0] + z[1]*z[1]);
+}
+
+void recvTCPPacket(SOCKET socketTCP){
+    BYTE buffer[maxPacketSize];
+    int len = 1;
+
+    while(len != SOCKET_ERROR){
+        len = recv(socketTCP, (char *) &buffer, sizeof(buffer), 0);
+
+        if (len > 0) {
+            ETH_RX_CTRL::status tcp_answer = *(ETH_RX_CTRL::status*)(buffer);
+            std::cout<<
+                "Answer to command : "
+                      <<ETH_RX_CTRL::cmdCOMMANDtoStr(tcp_answer.head.cmd_ack_type)
+                      <<" status: "
+                      << tcp_answer.head.cmd_complete << std::endl;
+        }
+
+        if(len == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK){
+            std::cout << "Failed to recvfromTCP: " << WSAGetLastError() << std::endl;
+            WSACleanup();
+            return;
+        }
+    }
+}
+
+void saveData(std::vector<std::vector<double>>& numbersForAverage, fftw_complex* fftCompexNumbers, int graphCount){
+    for(int i=0; i<pointsQty; i++){
+        numbersForAverage[graphCount % averageQty][i] = complexLog(fftCompexNumbers[i]);
+    }
+}
+
+void drawData(std::vector<std::vector<double>>& numbersForAverage, int graphCount, Priemnik* p){
+    std::vector<double> numbersForDraw(pointsQty);
+
+    for(int i=0; i<pointsQty; i++){
+        int sum = 0;
+        for(int j=0; j<averageQty; j++){
+            sum += numbersForAverage[j][i];
+        }
+
+        numbersForDraw[i] = sum / (graphCount < averageQty ? graphCount+1 : averageQty);
+    }
+    rotate(numbersForDraw.begin(), numbersForDraw.begin() + pointsQty/2, numbersForDraw.end());
+
+    emit p->sendData(numbersForDraw);
+}
+
+void accumulateForFFT(BYTE* buffer, fftw_complex* numbersForFFT, int packetsCount){
+    int start = partSize * (packetsCount % partsQty);
+    for(int i=0; i<partSize; i++){
+        numbersForFFT[start+i][0] = *(int32_t*)(buffer + sizeof(UDP_IQ::header_t) + i*8);
+        numbersForFFT[start+i][1] = *(int32_t*)(buffer + sizeof(UDP_IQ::header_t) + i*8 + sizeof(int32_t));
+    }
 }
