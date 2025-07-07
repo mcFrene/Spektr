@@ -25,6 +25,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(&p, SIGNAL(sendData(std::vector<double>)), this, SLOT(drawSpectr(std::vector<double>)));
     connect(&p, &Priemnik::priemnikFinished, this, &MainWindow::clearScene);
+    connect(&p, &Priemnik::throwError, this, &MainWindow::catchError);
 }
 
 MainWindow::~MainWindow()
@@ -39,30 +40,31 @@ MainWindow::~MainWindow()
 
 void MainWindow::on_pushButton_clicked()
 {
+    switchGUI(flag);
     if(flag){
-        ui->pushButton->setText("Включить");
-        ui->lineIP->setEnabled(true);
-        ui->linePort->setEnabled(true);
-        ui->lineFreq->setEnabled(true);
-
         p.isRunning = false;
         socketThread->join();
         delete socketThread;
     }
     else{
-        ui->pushButton->setText("Выключить");
-        ui->lineIP->setEnabled(false);
-        ui->linePort->setEnabled(false);
-        ui->lineFreq->setEnabled(false);
-
         initScene();
         std::string ip = ui->lineIP->text().toStdString();
         int port = ui->linePort->text().toInt();
         int freq = ui->lineFreq->text().toInt();
+
         p.isRunning = true;
         socketThread = new std::thread(&MainWindow::threadExec, this, ip, port, freq);
     }
     flag = !flag;
+}
+
+void MainWindow::switchGUI(bool flag)
+{
+    flag ? ui->pushButton->setText("Включить") : ui->pushButton->setText("Выключить");
+    ui->lineIP->setEnabled(flag);
+    ui->linePort->setEnabled(flag);
+    ui->lineFreq->setEnabled(flag);
+    ui->errorLabel->setText("");
 }
 
 void MainWindow::threadExec(std::string ip, int port, int freq)
@@ -147,3 +149,14 @@ void MainWindow::resizeEvent(QResizeEvent* event)
     if(flag) initScene();
 }
 
+void MainWindow::catchError(std::string error){
+    clearScene();
+    switchGUI(true);
+    flag = false;
+
+    QPalette palette = ui->errorLabel->palette();
+    palette.setColor(ui->errorLabel->foregroundRole(), Qt::red);
+    ui->errorLabel->setPalette(palette);
+
+    ui->errorLabel->setText(QString::fromStdString(error));
+}

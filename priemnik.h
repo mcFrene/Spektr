@@ -13,7 +13,7 @@ public:
 signals:
     void sendData(std::vector<double> numbers);
     void priemnikFinished();
-    void tcpError();
+    void throwError(std::string);
 public slots:
     void socketWork(std::string ip, int port, int freq);
 };

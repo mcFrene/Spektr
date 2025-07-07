@@ -24,6 +24,7 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
     void threadExec(std::string ip, int port, int freq);
+    void switchGUI(bool flag);
     void initScene();
 protected:
     void resizeEvent(QResizeEvent* event) override;
@@ -31,5 +32,6 @@ private slots:
     void on_pushButton_clicked();
     void clearScene();
     void drawSpectr(std::vector<double> numbers);
+    void catchError(std::string);
 };
 #endif // MAINWINDOW_H

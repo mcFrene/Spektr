@@ -49,7 +49,7 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
 
     if(::connect(socketTCP, (sockaddr *) &tcp_addr, sizeof(tcp_addr)) == SOCKET_ERROR){
         std::cout << "Failed to connect (tcp): " << WSAGetLastError() << std::endl;
-        emit tcpError();
+        emit throwError("Failed to connect (tcp): " + std::to_string(WSAGetLastError()));
         WSACleanup();
         return;
     }
@@ -123,8 +123,8 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
     }
 
     //MOLOTILKA
-    int packetsCount = 0;
-    int graphCount = 0;
+    short packetsCount = 0;
+    short graphCount = 0;
     fftw_complex numbersForFFT[pointsQty];
     BYTE buffer[maxPacketSize];
     fftw_plan plan = fftw_plan_dft_1d(pointsQty, numbersForFFT, numbersForFFT, FFTW_FORWARD, FFTW_ESTIMATE);
@@ -149,13 +149,16 @@ void Priemnik::socketWork(std::string ip, int port, int freq){
                 len = recvfrom(socketUDP, (char *) &buffer, sizeof(buffer), 0, (sockaddr*)&udp_addr, &fromlen_udp);
                 if(len == 2066){
                     accumulateForFFT(buffer, numbersForFFT, packetsCount);
-                    packetsCount++;
-
-                    if(packetsCount % partsQty == 0){
+                    packetsCount = (packetsCount + 1) % 4;
+                    if(packetsCount == 0){
                         fftw_execute(plan);
                         saveData(numbersForAverage, numbersForFFT, graphCount);
                         drawData(numbersForAverage, graphCount, this);
                         graphCount++;
+
+                        if(graphCount == 20){
+                            graphCount -= 10;
+                        }
                     }
                 }
 
